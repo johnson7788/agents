@@ -163,21 +163,15 @@ class RealtimeSessionOptions:
     voice: api_proto.Voice
     input_audio_format: api_proto.AudioFormat
     output_audio_format: api_proto.AudioFormat
-    input_audio_transcription: InputTranscriptionOptions | None
     turn_detection: VadOptions | None
     tool_choice: api_proto.ToolChoice
     temperature: float
-    max_response_output_tokens: int | Literal["inf"]
 
 
 @dataclass
 class _ModelOptions(RealtimeSessionOptions):
     api_key: str | None
     base_url: str
-    entra_token: str | None
-    azure_deployment: str | None
-    is_azure: bool
-    api_version: str | None
 
 
 class _ContentPtr(TypedDict):
@@ -185,8 +179,6 @@ class _ContentPtr(TypedDict):
     output_index: int
     content_index: int
 
-
-DEFAULT_INPUT_AUDIO_TRANSCRIPTION = InputTranscriptionOptions(model="default")
 
 
 class RealtimeModel:
@@ -200,11 +192,9 @@ class RealtimeModel:
         voice: api_proto.Voice = "default",
         input_audio_format: api_proto.AudioFormat = "pcm16",
         output_audio_format: api_proto.AudioFormat = "pcm16",
-        input_audio_transcription: InputTranscriptionOptions = DEFAULT_INPUT_AUDIO_TRANSCRIPTION,
         turn_detection: Optional[VadOptions] = "server_vad",
         tool_choice: api_proto.ToolChoice = "auto",
         temperature: float = 0.8,
-        max_response_output_tokens: int | Literal["inf"] = "inf",
         api_key: str | None = None,
         base_url: str | None = None,
         http_session: aiohttp.ClientSession | None = None,
@@ -220,11 +210,9 @@ class RealtimeModel:
         voice: api_proto.Voice = "default",
         input_audio_format: api_proto.AudioFormat = "pcm16",
         output_audio_format: api_proto.AudioFormat = "pcm16",
-        input_audio_transcription: InputTranscriptionOptions = DEFAULT_INPUT_AUDIO_TRANSCRIPTION,
         turn_detection: Optional[VadOptions] = "server_vad",
         tool_choice: api_proto.ToolChoice = "auto",
         temperature: float = 0.8,
-        max_response_output_tokens: int | Literal["inf"] = "inf",
         base_url: str | None = "wss://open.bigmodel.cn/api/paas/v4",
         api_key: str | None = None,
         http_session: aiohttp.ClientSession | None = None,
@@ -237,15 +225,15 @@ class RealtimeModel:
             instructions (str, optional): Initial system instructions for the model. Defaults to "".
             api_key (str or None, optional): GLM API key. If None, will attempt to read from the environment variable GLM_API_KEY
             modalities (api_proto.Modality, optional): Modalities to use, such as "audio" or "video_passive". Defaults to audio.
-            model (str or None, optional): The name of the model to use. Defaults to "gpt-4o-realtime-preview-2024-10-01".
+            model (str or None, optional): The name of the model to use. Defaults to "glm-4-realtime".
             voice (api_proto.Voice, optional): Voice setting for audio outputs. Defaults to "alloy".
             input_audio_format (api_proto.AudioFormat, optional): Format of input audio data. Defaults to "pcm16".
             output_audio_format (api_proto.AudioFormat, optional): Format of output audio data. Defaults to "pcm16".
-            input_audio_transcription (InputTranscriptionOptions, optional): Options for transcribing input audio. Defaults to DEFAULT_INPUT_AUDIO_TRANSCRIPTION.
+            input_audio_transcription (InputTranscriptionOptions, optional): GLM会自动进行STT，忽略这个选项.
             turn_detection (VadOptions, optional): "server_vad" or "client_vad"
             tool_choice (api_proto.ToolChoice, optional): Tool choice for the model, such as "auto". Defaults to "auto".
             temperature (float, optional): Sampling temperature for response generation. Defaults to 0.8.
-            max_response_output_tokens (int or Literal["inf"], optional): Maximum number of tokens in the response. Defaults to "inf".
+            max_response_output_tokens (int or Literal["inf"], optional): GLM没有这个选项
             base_url (str or None, optional): Base URL for the API endpoint. If None, defaults to GLM's default API URL.
             http_session (aiohttp.ClientSession or None, optional): Async HTTP session to use for requests. If None, a new session will be created.
             loop (asyncio.AbstractEventLoop or None, optional): Event loop to use for async operations. If None, the current event loop is used.
@@ -274,11 +262,9 @@ class RealtimeModel:
             voice=voice,
             input_audio_format=input_audio_format,
             output_audio_format=output_audio_format,
-            input_audio_transcription=input_audio_transcription,
             turn_detection=turn_detection,
             temperature=temperature,
             tool_choice=tool_choice,
-            max_response_output_tokens=max_response_output_tokens,
             api_key=api_key,
             base_url=base_url,
         )
@@ -312,12 +298,8 @@ class RealtimeModel:
         input_audio_format: api_proto.AudioFormat | None = None,
         output_audio_format: api_proto.AudioFormat | None = None,
         tool_choice: api_proto.ToolChoice | None = None,
-        input_audio_transcription: NotGivenOr[
-            InputTranscriptionOptions | None
-        ] = NOT_GIVEN,
         turn_detection: NotGivenOr[VadOptions | None] = "server_vad",
         temperature: float | None = None,
-        max_response_output_tokens: int | Literal["inf"] | None = None,
     ) -> RealtimeSession:
         opts = deepcopy(self._default_opts)
         if modalities is not None:
@@ -332,14 +314,10 @@ class RealtimeModel:
             opts.output_audio_format = output_audio_format
         if tool_choice is not None:
             opts.tool_choice = tool_choice
-        if utils.is_given(input_audio_transcription):
-            opts.input_audio_transcription = input_audio_transcription
         if utils.is_given(turn_detection):
             opts.turn_detection = turn_detection
         if temperature is not None:
             opts.temperature = temperature
-        if max_response_output_tokens is not None:
-            opts.max_response_output_tokens = max_response_output_tokens
 
         new_session = RealtimeSession(
             chat_ctx=chat_ctx or llm.ChatContext(),
@@ -369,14 +347,14 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                 }
             )
 
-        def append_video(self, frame: rtc.VideoFrame) -> None:
-            self._sess._queue_msg(
-                {
-                    "type": "input_audio_buffer.append_video_frame",
-                    "video_frame": base64.b64encode(frame.data).decode("utf-8"),
-                    "client_timestamp": time.time(),
-                }
-            )
+        # def append_video(self, frame: rtc.VideoFrame) -> None:
+        #     self._sess._queue_msg(
+        #         {
+        #             "type": "input_audio_buffer.append_video_frame",
+        #             "video_frame": base64.b64encode(frame.data).decode("utf-8"),
+        #             "client_timestamp": time.time(),
+        #         }
+        #     )
 
         def clear(self) -> None:
             self._sess._queue_msg({"type": "input_audio_buffer.clear"})
@@ -751,14 +729,11 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
         voice: api_proto.Voice | None = None,
         input_audio_format: api_proto.AudioFormat | None = None,
         output_audio_format: api_proto.AudioFormat | None = None,
-        input_audio_transcription: NotGivenOr[
-            InputTranscriptionOptions | None
-        ] = NOT_GIVEN,
         turn_detection: NotGivenOr[VadOptions | None] = "server_vad",
         tool_choice: api_proto.ToolChoice | None = None,
         temperature: float | None = None,
-        max_response_output_tokens: int | Literal["inf"] | None = None,
     ) -> None:
+        logger.info(f"session update, opts参数: {self._opts}")
         self._opts = deepcopy(self._opts)
         if modalities is not None:
             self._opts.modalities = modalities
@@ -770,16 +745,12 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
             self._opts.input_audio_format = input_audio_format
         if output_audio_format is not None:
             self._opts.output_audio_format = output_audio_format
-        if utils.is_given(input_audio_transcription):
-            self._opts.input_audio_transcription = input_audio_transcription
         if utils.is_given(turn_detection):
             self._opts.turn_detection = turn_detection
         if tool_choice is not None:
             self._opts.tool_choice = tool_choice
         if temperature is not None:
             self._opts.temperature = temperature
-        if max_response_output_tokens is not None:
-            self._opts.max_response_output_tokens = max_response_output_tokens
 
         tools = []
         if self._fnc_ctx is not None:
@@ -795,11 +766,6 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
             server_vad_opts = {
                 "type": self._opts.turn_detection,
             }
-        input_audio_transcription_opts: api_proto.InputAudioTranscription | None = None
-        if self._opts.input_audio_transcription is not None:
-            input_audio_transcription_opts = {
-                "model": self._opts.input_audio_transcription.model,
-            }
 
         session_data: api_proto.ClientEvent.SessionUpdateData = {
             "beta_fields": {
@@ -808,15 +774,13 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                 "auto_search": True,
             },
             "instructions": self._opts.instructions,
-            "voice": self._opts.voice, #没有这个选项，可能会忽略
+            # "voice": self._opts.voice, #没有这个选项，可能会忽略
             "input_audio_format": self._opts.input_audio_format,
             "output_audio_format": self._opts.output_audio_format,
-            "input_audio_transcription": input_audio_transcription_opts,  #没有这个选项，可能会忽略
             "turn_detection": server_vad_opts,
             "tools": tools,
-            "tool_choice": self._opts.tool_choice,  #没有这个选项，可能会忽略
-            "temperature": self._opts.temperature,   #没有这个选项，可能会忽略
-            "max_response_output_tokens": None,      #没有这个选项，可能会忽略
+            # "tool_choice": self._opts.tool_choice,  #没有这个选项，可能会忽略
+            # "temperature": self._opts.temperature,   #没有这个选项，可能会忽略
         }
         self._queue_msg(
             {
@@ -945,36 +909,26 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
         item.content = content
 
     def _queue_msg(self, msg: api_proto.ClientEvents) -> None:
+        logger.debug(f"sending message to GLM API: {msg}")
         self._send_ch.send_nowait(msg)
 
     @utils.log_exceptions(logger=logger)
     async def _main_task(self) -> None:
         try:
+            logger.info(f"开始连接GLM API Websocket API")
             headers = {"User-Agent": "LiveKit Agents"}
             query_params: dict[str, str] = {}
 
             base_url = self._opts.base_url
-            if self._opts.is_azure:
-                if self._opts.entra_token:
-                    headers["Authorization"] = f"Bearer {self._opts.entra_token}"
+            # GLM endpoint
+            headers["Authorization"] = f"Bearer {self._opts.api_key}"
+            headers["OpenAI-Beta"] = "realtime=v1"
 
-                if self._opts.api_key:
-                    headers["api-key"] = self._opts.api_key
+            if self._opts.model:
+                query_params["model"] = self._opts.model
 
-                if self._opts.api_version:
-                    query_params["api-version"] = self._opts.api_version
-
-                if self._opts.azure_deployment:
-                    query_params["deployment"] = self._opts.azure_deployment
-            else:
-                # OAI endpoint
-                headers["Authorization"] = f"Bearer {self._opts.api_key}"
-                headers["OpenAI-Beta"] = "realtime=v1"
-
-                if self._opts.model:
-                    query_params["model"] = self._opts.model
-
-            url = f"{base_url.rstrip('/')}/realtime?{urlencode(query_params)}"
+            # url = f"{base_url.rstrip('/')}/realtime?{urlencode(query_params)}" # GLM暂时不支持模型参数选项，会报错
+            url = f"{base_url.rstrip('/')}/realtime"
             if url.startswith("http"):
                 url = url.replace("http", "ws", 1)
 
@@ -982,6 +936,7 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                 url,
                 headers=headers,
             )
+            logger.info(f"GLM API Websocket API连接成功")
         except Exception:
             logger.exception("failed to connect to GLM API S2S")
             return
@@ -1036,7 +991,7 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                     elif event == "input_audio_buffer.committed":
                         self._handle_input_audio_buffer_speech_committed(data)
                     elif (
-                        event == "conversation.item.input_audio_transcription.completed"
+                        event == "conversation.item.input_audio_transcription.completed"  #存在这个事件
                     ):
                         self._handle_conversation_item_input_audio_transcription_completed(
                             data
@@ -1105,12 +1060,6 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
             turn_detection = VadOptions(
                 type=session["turn_detection"],
             )
-        if session["input_audio_transcription"] is None:
-            input_audio_transcription = None
-        else:
-            input_audio_transcription = InputTranscriptionOptions(
-                model=session["input_audio_transcription"]["model"],
-            )
 
         self.emit(
             "session_updated",
@@ -1121,17 +1070,15 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                 voice=session["voice"],
                 input_audio_format=session["input_audio_format"],
                 output_audio_format=session["output_audio_format"],
-                input_audio_transcription=input_audio_transcription,
                 turn_detection=turn_detection,
                 tool_choice=session["tool_choice"],
                 temperature=session["temperature"],
-                max_response_output_tokens=session["max_response_output_tokens"],
             ),
         )
 
     def _handle_error(self, error: api_proto.ServerEvent.Error):
         logger.error(
-            "GLM S2S error %s",
+            "GLM Reamtime error %s",
             error,
             extra=self.logging_extra(),
         )
