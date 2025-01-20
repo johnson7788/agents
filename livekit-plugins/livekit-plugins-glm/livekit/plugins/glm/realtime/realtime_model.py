@@ -190,7 +190,7 @@ class RealtimeModel:
         modalities: api_proto.Modality = "audio",
         model: api_proto.GLMModel | str = api_proto.DefaultGLMModel,
         voice: api_proto.Voice = "default",
-        input_audio_format: api_proto.AudioFormat = "pcm16",
+        input_audio_format: api_proto.AudioFormat = "wav",  #目前不支持pcm16输入
         output_audio_format: api_proto.AudioFormat = "pcm16",
         turn_detection: Optional[VadOptions] = "server_vad",
         tool_choice: api_proto.ToolChoice = "auto",
@@ -208,7 +208,7 @@ class RealtimeModel:
         modalities: api_proto.Modality = "audio",
         model: api_proto.GLMModel | str = api_proto.DefaultGLMModel,
         voice: api_proto.Voice = "default",
-        input_audio_format: api_proto.AudioFormat = "pcm16",
+        input_audio_format: api_proto.AudioFormat = "wav",
         output_audio_format: api_proto.AudioFormat = "pcm16",
         turn_detection: Optional[VadOptions] = "server_vad",
         tool_choice: api_proto.ToolChoice = "auto",
@@ -227,7 +227,7 @@ class RealtimeModel:
             modalities (api_proto.Modality, optional): Modalities to use, such as "audio" or "video_passive". Defaults to audio.
             model (str or None, optional): The name of the model to use. Defaults to "glm-4-realtime".
             voice (api_proto.Voice, optional): Voice setting for audio outputs. Defaults to "alloy".
-            input_audio_format (api_proto.AudioFormat, optional): Format of input audio data. Defaults to "pcm16".
+            input_audio_format (api_proto.AudioFormat, optional): Format of input audio data. Defaults to "wav".
             output_audio_format (api_proto.AudioFormat, optional): Format of output audio data. Defaults to "pcm16".
             input_audio_transcription (InputTranscriptionOptions, optional): GLM会自动进行STT，忽略这个选项.
             turn_detection (VadOptions, optional): "server_vad" or "client_vad"
@@ -340,6 +340,7 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
             self._sess = sess
 
         def append(self, frame: rtc.AudioFrame) -> None:
+            logger.info(f"append audio, {frame}")
             self._sess._queue_msg(
                 {
                     "type": "input_audio_buffer.append",

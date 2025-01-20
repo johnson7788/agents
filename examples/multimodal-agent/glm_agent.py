@@ -8,19 +8,22 @@ from dotenv import load_dotenv
 from livekit.agents import (
     AutoSubscribe,
     JobContext,
+    JobProcess,
     WorkerOptions,
     WorkerType,
     cli,
     llm,
     multimodal,
 )
-from livekit.plugins import glm
+from livekit.plugins import glm,silero
 
 load_dotenv('.env_glm')
 
 logger = logging.getLogger("my-worker")
 logger.setLevel(logging.INFO)
 
+def prewarm(proc: JobProcess):
+    proc.userdata["vad"] = silero.VAD.load()
 
 async def entrypoint(ctx: JobContext):
     logger.info("starting entrypoint")
