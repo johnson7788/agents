@@ -1,5 +1,5 @@
 # LiveKit realtime moderation agent using Hive
-
+Hive 提供 21 种不同的 API，涵盖三个不同的类别：理解、搜索和生成。Hive模型
 This is an agent that performs visual moderation of every participant's video in a room.  It does this moderation using the Visual Content Moderation model from [Hive](https://thehive.ai) [[docs](https://docs.thehive.ai/docs/visual-content-moderation#visual-content-moderation)].
 
 ## Prerequisites
