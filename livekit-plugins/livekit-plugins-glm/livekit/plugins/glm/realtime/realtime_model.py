@@ -186,7 +186,7 @@ class _ContentPtr(TypedDict):
     content_index: int
 
 
-DEFAULT_INPUT_AUDIO_TRANSCRIPTION = InputTranscriptionOptions(model="whisper-1")
+DEFAULT_INPUT_AUDIO_TRANSCRIPTION = InputTranscriptionOptions(model="default")
 
 
 class RealtimeModel:
@@ -197,11 +197,11 @@ class RealtimeModel:
         instructions: str = "",
         modalities: api_proto.Modality = "audio",
         model: api_proto.OpenAIModel | str = api_proto.DefaultGLMModel,
-        voice: api_proto.Voice = "alloy",
+        voice: api_proto.Voice = "default",
         input_audio_format: api_proto.AudioFormat = "pcm16",
         output_audio_format: api_proto.AudioFormat = "pcm16",
         input_audio_transcription: InputTranscriptionOptions = DEFAULT_INPUT_AUDIO_TRANSCRIPTION,
-        turn_detection: Optional[VadOptions] = {"type": "server_vad"},
+        turn_detection: Optional[VadOptions] = "server_vad",
         tool_choice: api_proto.ToolChoice = "auto",
         temperature: float = 0.8,
         max_response_output_tokens: int | Literal["inf"] = "inf",
@@ -217,11 +217,11 @@ class RealtimeModel:
         instructions: str = "",
         modalities: api_proto.Modality = "audio",
         model: api_proto.OpenAIModel | str = api_proto.DefaultGLMModel,
-        voice: api_proto.Voice = "alloy",
+        voice: api_proto.Voice = "default",
         input_audio_format: api_proto.AudioFormat = "pcm16",
         output_audio_format: api_proto.AudioFormat = "pcm16",
         input_audio_transcription: InputTranscriptionOptions = DEFAULT_INPUT_AUDIO_TRANSCRIPTION,
-        turn_detection: Optional[VadOptions] = {"type": "server_vad"},
+        turn_detection: Optional[VadOptions] = "server_vad",
         tool_choice: api_proto.ToolChoice = "auto",
         temperature: float = 0.8,
         max_response_output_tokens: int | Literal["inf"] = "inf",
@@ -242,7 +242,7 @@ class RealtimeModel:
             input_audio_format (api_proto.AudioFormat, optional): Format of input audio data. Defaults to "pcm16".
             output_audio_format (api_proto.AudioFormat, optional): Format of output audio data. Defaults to "pcm16".
             input_audio_transcription (InputTranscriptionOptions, optional): Options for transcribing input audio. Defaults to DEFAULT_INPUT_AUDIO_TRANSCRIPTION.
-            turn_detection (VadOptions, optional): {"type": "server_vad"} or {"type": "client_vad"}
+            turn_detection (VadOptions, optional): "server_vad" or "client_vad"
             tool_choice (api_proto.ToolChoice, optional): Tool choice for the model, such as "auto". Defaults to "auto".
             temperature (float, optional): Sampling temperature for response generation. Defaults to 0.8.
             max_response_output_tokens (int or Literal["inf"], optional): Maximum number of tokens in the response. Defaults to "inf".
@@ -258,14 +258,14 @@ class RealtimeModel:
             supports_truncate=True,
         )
         self._base_url = base_url
-        api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        api_key = api_key or os.environ.get("GLM_API_KEY")
         if api_key is None:
             raise ValueError(
                 "GLM API key is required, either using the argument or by setting the GLM_API_KEY environmental variable"
             )
 
         if not base_url:
-            base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+            base_url = os.getenv("GLM_BASE_URL", "wss://open.bigmodel.cn/api/paas/v4/realtime")
 
         self._default_opts = _ModelOptions(
             model=model,
@@ -315,7 +315,7 @@ class RealtimeModel:
         input_audio_transcription: NotGivenOr[
             InputTranscriptionOptions | None
         ] = NOT_GIVEN,
-        turn_detection: NotGivenOr[VadOptions | None] = {"type": "server_vad"},
+        turn_detection: NotGivenOr[VadOptions | None] = "server_vad",
         temperature: float | None = None,
         max_response_output_tokens: int | Literal["inf"] | None = None,
     ) -> RealtimeSession:
@@ -366,6 +366,15 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                 {
                     "type": "input_audio_buffer.append",
                     "audio": base64.b64encode(frame.data).decode("utf-8"),
+                }
+            )
+
+        def append_video(self, frame: rtc.VideoFrame) -> None:
+            self._sess._queue_msg(
+                {
+                    "type": "input_audio_buffer.append_video_frame",
+                    "video_frame": base64.b64encode(frame.data).decode("utf-8"),
+                    "client_timestamp": time.time(),
                 }
             )
 
@@ -745,7 +754,7 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
         input_audio_transcription: NotGivenOr[
             InputTranscriptionOptions | None
         ] = NOT_GIVEN,
-        turn_detection: NotGivenOr[VadOptions | None] = {"type": "server_vad"},
+        turn_detection: NotGivenOr[VadOptions | None] = "server_vad",
         tool_choice: api_proto.ToolChoice | None = None,
         temperature: float | None = None,
         max_response_output_tokens: int | Literal["inf"] | None = None,
@@ -784,10 +793,7 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
         server_vad_opts: api_proto.ServerVad | None = None
         if self._opts.turn_detection is not None:
             server_vad_opts = {
-                "type": "server_vad",
-                "threshold": self._opts.turn_detection.threshold,
-                "prefix_padding_ms": self._opts.turn_detection.prefix_padding_ms,
-                "silence_duration_ms": self._opts.turn_detection.silence_duration_ms,
+                "type": self._opts.turn_detection,
             }
         input_audio_transcription_opts: api_proto.InputAudioTranscription | None = None
         if self._opts.input_audio_transcription is not None:
@@ -796,29 +802,22 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
             }
 
         session_data: api_proto.ClientEvent.SessionUpdateData = {
-            "modalities": self._opts.modalities,
+            "beta_fields": {
+                "chat_mode": self._opts.modalities,
+                "tts_source": "e2e",
+                "auto_search": True,
+            },
             "instructions": self._opts.instructions,
-            "voice": self._opts.voice,
+            "voice": self._opts.voice, #没有这个选项，可能会忽略
             "input_audio_format": self._opts.input_audio_format,
             "output_audio_format": self._opts.output_audio_format,
-            "input_audio_transcription": input_audio_transcription_opts,
+            "input_audio_transcription": input_audio_transcription_opts,  #没有这个选项，可能会忽略
             "turn_detection": server_vad_opts,
             "tools": tools,
-            "tool_choice": self._opts.tool_choice,
-            "temperature": self._opts.temperature,
-            "max_response_output_tokens": None,
+            "tool_choice": self._opts.tool_choice,  #没有这个选项，可能会忽略
+            "temperature": self._opts.temperature,   #没有这个选项，可能会忽略
+            "max_response_output_tokens": None,      #没有这个选项，可能会忽略
         }
-
-        # azure doesn't support inf for max_response_output_tokens
-        if not self._opts.is_azure or isinstance(
-            self._opts.max_response_output_tokens, int
-        ):
-            session_data["max_response_output_tokens"] = (
-                self._opts.max_response_output_tokens
-            )
-        else:
-            del session_data["max_response_output_tokens"]  # type: ignore
-
         self._queue_msg(
             {
                 "type": "session.update",
@@ -1101,12 +1100,10 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
     ):
         session = session_updated["session"]
         if session["turn_detection"] is None:
-            turn_detection = None
+            turn_detection = {"type": "server_vad"}
         else:
-            turn_detection = ServerVadOptions(
-                threshold=session["turn_detection"]["threshold"],
-                prefix_padding_ms=session["turn_detection"]["prefix_padding_ms"],
-                silence_duration_ms=session["turn_detection"]["silence_duration_ms"],
+            turn_detection = VadOptions(
+                type=session["turn_detection"],
             )
         if session["input_audio_transcription"] is None:
             input_audio_transcription = None
