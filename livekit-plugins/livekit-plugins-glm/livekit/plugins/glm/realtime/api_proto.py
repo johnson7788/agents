@@ -29,7 +29,7 @@ ResponseStatus = Literal[
 TurnDetectionType = Literal["server_vad","client_vad"]
 
 # https://www.bigmodel.cn/dev/howuse/glm-realtime?ap=
-OpenAIModel = Literal[
+GLMModel = Literal[
     "glm-4-realtime"
 ]
 DefaultGLMModel = "glm-4-realtime"

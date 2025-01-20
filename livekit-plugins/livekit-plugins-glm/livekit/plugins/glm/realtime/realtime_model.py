@@ -157,7 +157,7 @@ class RealtimeError:
 
 @dataclass
 class RealtimeSessionOptions:
-    model: api_proto.OpenAIModel | str
+    model: api_proto.GLMModel | str
     modalities: api_proto.Modality
     instructions: str
     voice: api_proto.Voice
@@ -196,7 +196,7 @@ class RealtimeModel:
         *,
         instructions: str = "",
         modalities: api_proto.Modality = "audio",
-        model: api_proto.OpenAIModel | str = api_proto.DefaultGLMModel,
+        model: api_proto.GLMModel | str = api_proto.DefaultGLMModel,
         voice: api_proto.Voice = "default",
         input_audio_format: api_proto.AudioFormat = "pcm16",
         output_audio_format: api_proto.AudioFormat = "pcm16",
@@ -216,7 +216,7 @@ class RealtimeModel:
         *,
         instructions: str = "",
         modalities: api_proto.Modality = "audio",
-        model: api_proto.OpenAIModel | str = api_proto.DefaultGLMModel,
+        model: api_proto.GLMModel | str = api_proto.DefaultGLMModel,
         voice: api_proto.Voice = "default",
         input_audio_format: api_proto.AudioFormat = "pcm16",
         output_audio_format: api_proto.AudioFormat = "pcm16",
@@ -225,17 +225,17 @@ class RealtimeModel:
         tool_choice: api_proto.ToolChoice = "auto",
         temperature: float = 0.8,
         max_response_output_tokens: int | Literal["inf"] = "inf",
-        base_url: str | None = "wss://open.bigmodel.cn/api/paas/v4/realtime",
+        base_url: str | None = "wss://open.bigmodel.cn/api/paas/v4",
         api_key: str | None = None,
         http_session: aiohttp.ClientSession | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         """
-        Initializes a RealtimeClient instance for interacting with OpenAI's Realtime API.
+        Initializes a RealtimeClient instance for interacting with Zhipu GLM's Realtime API.
 
         Args:
             instructions (str, optional): Initial system instructions for the model. Defaults to "".
-            api_key (str or None, optional): OpenAI API key. If None, will attempt to read from the environment variable OPENAI_API_KEY
+            api_key (str or None, optional): GLM API key. If None, will attempt to read from the environment variable GLM_API_KEY
             modalities (api_proto.Modality, optional): Modalities to use, such as "audio" or "video_passive". Defaults to audio.
             model (str or None, optional): The name of the model to use. Defaults to "gpt-4o-realtime-preview-2024-10-01".
             voice (api_proto.Voice, optional): Voice setting for audio outputs. Defaults to "alloy".
@@ -246,7 +246,7 @@ class RealtimeModel:
             tool_choice (api_proto.ToolChoice, optional): Tool choice for the model, such as "auto". Defaults to "auto".
             temperature (float, optional): Sampling temperature for response generation. Defaults to 0.8.
             max_response_output_tokens (int or Literal["inf"], optional): Maximum number of tokens in the response. Defaults to "inf".
-            base_url (str or None, optional): Base URL for the API endpoint. If None, defaults to OpenAI's default API URL.
+            base_url (str or None, optional): Base URL for the API endpoint. If None, defaults to GLM's default API URL.
             http_session (aiohttp.ClientSession or None, optional): Async HTTP session to use for requests. If None, a new session will be created.
             loop (asyncio.AbstractEventLoop or None, optional): Event loop to use for async operations. If None, the current event loop is used.
 
@@ -265,7 +265,7 @@ class RealtimeModel:
             )
 
         if not base_url:
-            base_url = os.getenv("GLM_BASE_URL", "wss://open.bigmodel.cn/api/paas/v4/realtime")
+            base_url = os.getenv("GLM_BASE_URL", "wss://open.bigmodel.cn/api/paas/v4")
 
         self._default_opts = _ModelOptions(
             model=model,
@@ -913,7 +913,7 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
     def _recover_from_text_response(self, item_id: str | None = None) -> None:
         """Try to recover from a text response to audio mode.
 
-        Sometimes the OpenAI Realtime API returns text instead of audio responses.
+        Sometimes the GLM Realtime API returns text instead of audio responses.
         This method tries to recover from this by requesting a new response after
         deleting the text response and creating an empty user audio message.
         """
@@ -983,7 +983,7 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                 headers=headers,
             )
         except Exception:
-            logger.exception("failed to connect to OpenAI API S2S")
+            logger.exception("failed to connect to GLM API S2S")
             return
 
         closing = False
@@ -1009,11 +1009,11 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                     if closing:
                         return
 
-                    raise Exception("OpenAI S2S connection closed unexpectedly")
+                    raise Exception("GLM S2S connection closed unexpectedly")
 
                 if msg.type != aiohttp.WSMsgType.TEXT:
                     logger.warning(
-                        "unexpected OpenAI S2S message type %s",
+                        "unexpected GLM S2S message type %s",
                         msg.type,
                         extra=self.logging_extra(),
                     )
@@ -1076,13 +1076,13 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
 
                 except Exception:
                     logger.exception(
-                        "failed to handle OpenAI S2S message",
+                        "failed to handle GLM S2S message",
                         extra={"websocket_message": msg, **self.logging_extra()},
                     )
 
         tasks = [
-            asyncio.create_task(_send_task(), name="openai-realtime-send"),
-            asyncio.create_task(_recv_task(), name="openai-realtime-recv"),
+            asyncio.create_task(_send_task(), name="glm-realtime-send"),
+            asyncio.create_task(_recv_task(), name="glm-realtime-recv"),
         ]
 
         try:
@@ -1131,7 +1131,7 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
 
     def _handle_error(self, error: api_proto.ServerEvent.Error):
         logger.error(
-            "OpenAI S2S error %s",
+            "GLM S2S error %s",
             error,
             extra=self.logging_extra(),
         )
