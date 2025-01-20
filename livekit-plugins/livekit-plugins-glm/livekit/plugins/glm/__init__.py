@@ -32,12 +32,12 @@ from livekit.agents import Plugin
 from .log import logger
 
 
-class OpenAIPlugin(Plugin):
+class GLMPlugin(Plugin):
     def __init__(self) -> None:
         super().__init__(__name__, __version__, __package__, logger)
 
 
-Plugin.register_plugin(OpenAIPlugin())
+Plugin.register_plugin(GLMPlugin())
 
 # Cleanup docs of unexported modules
 _module = dir()
