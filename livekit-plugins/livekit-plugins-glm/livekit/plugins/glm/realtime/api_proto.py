@@ -179,7 +179,7 @@ class Resource:
         object: Literal["realtime.session"]
         expires_at: int
         model: str
-        modalities: list[Literal["text", "audio"]]
+        modalities: Literal["video_passive", "audio"]
         instructions: str
         voice: Voice
         input_audio_format: AudioFormat
@@ -208,7 +208,7 @@ class Resource:
 
 class ClientEvent:
     class SessionUpdateData(TypedDict):
-        modalities: list[Literal["text", "audio"]]
+        modalities: Literal["video_passive", "audio"]
         instructions: str
         voice: Voice
         input_audio_format: AudioFormat
@@ -297,7 +297,7 @@ class ClientEvent:
         item_id: str
 
     class ResponseCreateData(TypedDict, total=False):
-        modalities: list[Literal["text", "audio"]]
+        modalities: Literal["video_passive", "audio"]
         instructions: str
         voice: Voice
         output_audio_format: AudioFormat

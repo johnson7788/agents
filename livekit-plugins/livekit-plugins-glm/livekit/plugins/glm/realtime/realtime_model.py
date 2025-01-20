@@ -158,7 +158,7 @@ class RealtimeError:
 @dataclass
 class RealtimeSessionOptions:
     model: api_proto.OpenAIModel | str
-    modalities: list[api_proto.Modality]
+    modalities: api_proto.Modality
     instructions: str
     voice: api_proto.Voice
     input_audio_format: api_proto.AudioFormat
@@ -195,7 +195,7 @@ class RealtimeModel:
         self,
         *,
         instructions: str = "",
-        modalities: list[api_proto.Modality] = ["text", "audio"],
+        modalities: api_proto.Modality = "audio",
         model: api_proto.OpenAIModel | str = api_proto.DefaultGLMModel,
         voice: api_proto.Voice = "alloy",
         input_audio_format: api_proto.AudioFormat = "pcm16",
@@ -215,7 +215,7 @@ class RealtimeModel:
         self,
         *,
         instructions: str = "",
-        modalities: list[api_proto.Modality] = ["text", "audio"],
+        modalities: api_proto.Modality = "audio",
         model: api_proto.OpenAIModel | str = api_proto.DefaultGLMModel,
         voice: api_proto.Voice = "alloy",
         input_audio_format: api_proto.AudioFormat = "pcm16",
@@ -226,6 +226,7 @@ class RealtimeModel:
         temperature: float = 0.8,
         max_response_output_tokens: int | Literal["inf"] = "inf",
         base_url: str | None = "wss://open.bigmodel.cn/api/paas/v4/realtime",
+        api_key: str | None = None,
         http_session: aiohttp.ClientSession | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
@@ -235,7 +236,7 @@ class RealtimeModel:
         Args:
             instructions (str, optional): Initial system instructions for the model. Defaults to "".
             api_key (str or None, optional): OpenAI API key. If None, will attempt to read from the environment variable OPENAI_API_KEY
-            modalities (list[api_proto.Modality], optional): Modalities to use, such as ["text", "audio"]. Defaults to ["text", "audio"].
+            modalities (api_proto.Modality, optional): Modalities to use, such as "audio" or "video_passive". Defaults to audio.
             model (str or None, optional): The name of the model to use. Defaults to "gpt-4o-realtime-preview-2024-10-01".
             voice (api_proto.Voice, optional): Voice setting for audio outputs. Defaults to "alloy".
             input_audio_format (api_proto.AudioFormat, optional): Format of input audio data. Defaults to "pcm16".
@@ -257,17 +258,10 @@ class RealtimeModel:
             supports_truncate=True,
         )
         self._base_url = base_url
-
-        is_azure = (
-            api_version is not None
-            or entra_token is not None
-            or azure_deployment is not None
-        )
-
         api_key = api_key or os.environ.get("OPENAI_API_KEY")
-        if api_key is None and not is_azure:
+        if api_key is None:
             raise ValueError(
-                "OpenAI API key is required, either using the argument or by setting the OPENAI_API_KEY environmental variable"
+                "GLM API key is required, either using the argument or by setting the GLM_API_KEY environmental variable"
             )
 
         if not base_url:
@@ -312,7 +306,7 @@ class RealtimeModel:
         *,
         chat_ctx: llm.ChatContext | None = None,
         fnc_ctx: llm.FunctionContext | None = None,
-        modalities: list[api_proto.Modality] | None = None,
+        modalities: api_proto.Modality | None = None,
         instructions: str | None = None,
         voice: api_proto.Voice | None = None,
         input_audio_format: api_proto.AudioFormat | None = None,
