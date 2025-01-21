@@ -61,12 +61,24 @@ async def entrypoint(ctx: JobContext):
             voice="default",
             temperature=0.8,
             instructions="You are a helpful assistant",
+            turn_detection ="client_vad"
         ),
         fnc_ctx=fnc_ctx,
         chat_ctx=chat_ctx,
+        vad=ctx.proc.userdata["vad"],
     )
+    # agent = multimodal.MultimodalAgent(
+    #     model=glm.realtime.RealtimeModel(
+    #         voice="default",
+    #         temperature=0.8,
+    #         instructions="You are a helpful assistant",
+    #         turn_detection = "server_vad"
+    #     ),
+    #     fnc_ctx=fnc_ctx,
+    #     chat_ctx=chat_ctx,
+    # )
     agent.start(ctx.room, participant)
 
 
 if __name__ == "__main__":
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, worker_type=WorkerType.ROOM))
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, worker_type=WorkerType.ROOM,prewarm_fnc=prewarm))
