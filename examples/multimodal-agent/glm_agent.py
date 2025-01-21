@@ -54,6 +54,7 @@ async def entrypoint(ctx: JobContext):
     participant = await ctx.wait_for_participant()
 
     chat_ctx = llm.ChatContext()
+    chat_ctx.append(role="user", text="北京的今天的天气如何?")
 
     agent = multimodal.MultimodalAgent(
         model=glm.realtime.RealtimeModel(

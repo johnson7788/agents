@@ -774,6 +774,7 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                 "tts_source": "e2e",
                 "auto_search": True,
             },
+            "model": "glm-4-realtime",
             "instructions": self._opts.instructions,
             # "voice": self._opts.voice, #没有这个选项，可能会忽略
             "input_audio_format": self._opts.input_audio_format,
