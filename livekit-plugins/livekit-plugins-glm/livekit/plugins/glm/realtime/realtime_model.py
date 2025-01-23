@@ -341,21 +341,22 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
 
         def append(self, frame: rtc.AudioFrame) -> None:
             logger.info(f"append audio, {frame}")
+            wav_data = frame.to_wav_bytes()
             self._sess._queue_msg(
                 {
                     "type": "input_audio_buffer.append",
-                    "audio": base64.b64encode(frame.data).decode("utf-8"),
+                    "audio": base64.b64encode(wav_data).decode("utf-8"),
                 }
             )
 
-        # def append_video(self, frame: rtc.VideoFrame) -> None:
-        #     self._sess._queue_msg(
-        #         {
-        #             "type": "input_audio_buffer.append_video_frame",
-        #             "video_frame": base64.b64encode(frame.data).decode("utf-8"),
-        #             "client_timestamp": time.time(),
-        #         }
-        #     )
+        def append_video(self, frame: rtc.VideoFrame) -> None:
+            self._sess._queue_msg(
+                {
+                    "type": "input_audio_buffer.append_video_frame",
+                    "video_frame": base64.b64encode(frame.data).decode("utf-8"),
+                    "client_timestamp": time.time(),
+                }
+            )
 
         def clear(self) -> None:
             self._sess._queue_msg({"type": "input_audio_buffer.clear"})
@@ -1495,6 +1496,9 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
 
     def _get_content(self, ptr: _ContentPtr) -> RealtimeContent:
         response = self._pending_responses[ptr["response_id"]]
+        print(f"返回消息是: {response}")
+        if not response.output:
+            return ""
         output = response.output[ptr["output_index"]]
         content = output.content[ptr["content_index"]]
         return content
