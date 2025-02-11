@@ -41,12 +41,10 @@ logger.setLevel(getattr(logging, log_level, logging.INFO))
 async def entrypoint(ctx: JobContext):
     logger.info("starting entrypoint")
 
-    room = ctx.room
-
-    await ctx.connect(auto_subscribe=AutoSubscribe.SUBSCRIBE_ALL)
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
     participant = await ctx.wait_for_participant()
 
-    print(f"connected to room {room.name} with participant {participant.identity}")
+    print(f"connected to room {ctx.room.name} with participant {participant.identity}")
 
     # create a chat context with chat history, these will be synchronized with the server
     # upon calling `agent.generate_reply()`
@@ -62,9 +60,8 @@ async def entrypoint(ctx: JobContext):
         model=model,
         chat_ctx=chat_ctx,
     )
-    agent.start(room, participant)
+    agent.start(ctx.room, participant)
     agent.generate_reply(on_duplicate="cancel_new")
-    session = model.sessions[0]
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, worker_type=WorkerType.ROOM))
