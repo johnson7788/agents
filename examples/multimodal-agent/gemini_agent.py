@@ -8,11 +8,12 @@ from dotenv import load_dotenv
 from livekit.agents import (
     AutoSubscribe,
     JobContext,
+    llm,
+    cli,
     WorkerOptions,
     WorkerType,
-    cli,
-    llm,
     multimodal,
+    utils,
 )
 from livekit.plugins import google
 
@@ -50,6 +51,8 @@ async def entrypoint(ctx: JobContext):
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
     participant = await ctx.wait_for_participant()
 
+    print(f"connected to room {ctx.room.name} with participant {participant.identity}")
+
     # create a chat context with chat history, these will be synchronized with the server
     # upon calling `agent.generate_reply()`
     chat_ctx = llm.ChatContext()
@@ -58,13 +61,15 @@ async def entrypoint(ctx: JobContext):
     #     text="How exciting! Paris is a beautiful city. I'd be happy to suggest some must-visit places and help you plan your trip.",
     #     role="assistant",
     # )
-
-    agent = multimodal.MultimodalAgent(
-        model=google.beta.realtime.RealtimeModel(
+    model = google.beta.realtime.RealtimeModel(
+            model="gemini-2.0-flash-exp",
             voice="Puck",
             temperature=0.8,
+            modalities=["AUDIO"],
             instructions="You are a helpful assistant, greet the user and help them with their trip planning",
-        ),
+        )
+    agent = multimodal.MultimodalAgent(
+        model=model,
         fnc_ctx=fnc_ctx,
         chat_ctx=chat_ctx,
     )
