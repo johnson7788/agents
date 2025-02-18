@@ -71,14 +71,15 @@ async def entrypoint(ctx: JobContext):
 
     # create a chat context with chat history, these will be synchronized with the server
     # upon calling `agent.generate_reply()`
-    chat_ctx = llm.ChatContext()
     model = google.beta.realtime.RealtimeModel(
-        model="gemini-2.0-flash-exp",
+        model="gemini-2.0-flash-001",  #001 Bug待修复
         voice="Puck",
         modalities=["AUDIO"],
         temperature=0.8,
         instructions="You are an intelligent, general-purpose AI assistant. Your goal is to provide accurate, concise, and helpful responses based on the user’s request",
     )
+    chat_ctx = llm.ChatContext()
+    chat_ctx.append(text="Hello", role="user")
     agent = multimodal.MultimodalAgent(
         model=model,
         chat_ctx=chat_ctx,
