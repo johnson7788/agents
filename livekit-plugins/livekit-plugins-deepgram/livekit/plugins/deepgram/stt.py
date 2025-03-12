@@ -442,6 +442,7 @@ class SpeechStream(stt.SpeechStream):
             except Exception:
                 return
 
+        @utils.log_exceptions(logger=logger)
         async def send_task(ws: aiohttp.ClientWebSocketResponse):
             nonlocal closing_ws
 
@@ -494,6 +495,7 @@ class SpeechStream(stt.SpeechStream):
             closing_ws = True
             await ws.send_str(SpeechStream._CLOSE_MSG)
 
+        @utils.log_exceptions(logger=logger)
         async def recv_task(ws: aiohttp.ClientWebSocketResponse):
             nonlocal closing_ws
             while True:
@@ -572,7 +574,9 @@ class SpeechStream(stt.SpeechStream):
         if self._opts.keywords:
             live_config["keywords"] = self._opts.keywords
         if self._opts.keyterms:
-            live_config["keyterms"] = self._opts.keyterms
+            # the query param is `keyterm`
+            # See: https://developers.deepgram.com/docs/keyterm
+            live_config["keyterm"] = self._opts.keyterms
 
         if self._opts.language:
             live_config["language"] = self._opts.language

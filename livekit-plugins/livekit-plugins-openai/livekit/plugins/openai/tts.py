@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from typing import Optional
 
 import httpx
 from livekit.agents import (
-    DEFAULT_API_CONNECT_OPTIONS,
     APIConnectionError,
     APIConnectOptions,
     APIStatusError,
@@ -30,6 +30,7 @@ from livekit.agents import (
 
 import openai
 
+from .log import logger
 from .models import TTSModels, TTSVoices
 from .utils import AsyncAzureADTokenProvider
 
@@ -143,7 +144,7 @@ class TTS(tts.TTS):
         self,
         text: str,
         *,
-        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+        conn_options: Optional[APIConnectOptions] = None,
     ) -> "ChunkedStream":
         return ChunkedStream(
             tts=self,
@@ -160,7 +161,7 @@ class ChunkedStream(tts.ChunkedStream):
         *,
         tts: TTS,
         input_text: str,
-        conn_options: APIConnectOptions,
+        conn_options: Optional[APIConnectOptions] = None,
         opts: _TTSOptions,
         client: openai.AsyncClient,
     ) -> None:
@@ -184,6 +185,7 @@ class ChunkedStream(tts.ChunkedStream):
             num_channels=OPENAI_TTS_CHANNELS,
         )
 
+        @utils.log_exceptions(logger=logger)
         async def _decode_loop():
             try:
                 async with oai_stream as stream:
@@ -195,16 +197,13 @@ class ChunkedStream(tts.ChunkedStream):
         decode_task = asyncio.create_task(_decode_loop())
 
         try:
+            emitter = tts.SynthesizedAudioEmitter(
+                event_ch=self._event_ch,
+                request_id=request_id,
+            )
             async for frame in decoder:
-                if self._event_ch.closed:
-                    break
-                self._event_ch.send_nowait(
-                    tts.SynthesizedAudio(
-                        frame=frame,
-                        request_id=request_id,
-                    )
-                )
-            await decode_task
+                emitter.push(frame)
+            emitter.flush()
         except openai.APITimeoutError:
             raise APITimeoutError()
         except openai.APIStatusError as e:
