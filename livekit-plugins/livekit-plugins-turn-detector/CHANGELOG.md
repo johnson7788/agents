@@ -1,5 +1,33 @@
 # livekit-plugins-eou
 
+## 0.4.3
+
+### Patch Changes
+
+- updated livekit-agent reference to <1.0 - [#1607](https://github.com/livekit/agents/pull/1607) ([@davidzhao](https://github.com/davidzhao))
+
+- retrained to be robust to missing terminal punctuation - [#1565](https://github.com/livekit/agents/pull/1565) ([@jeradf](https://github.com/jeradf))
+
+## 0.4.2
+
+### Patch Changes
+
+- log from job process instead of inference - [#1506](https://github.com/livekit/agents/pull/1506) ([@davidzhao](https://github.com/davidzhao))
+
+## 0.4.1
+
+### Patch Changes
+
+- fix incorrect dtype on windows - [#1452](https://github.com/livekit/agents/pull/1452) ([@jeradf](https://github.com/jeradf))
+
+- adjust default probability cutoff - [#1465](https://github.com/livekit/agents/pull/1465) ([@jeradf](https://github.com/jeradf))
+
+## 0.4.0
+
+### Minor Changes
+
+- more accurate, smaller, faster model - [#1426](https://github.com/livekit/agents/pull/1426) ([@jeradf](https://github.com/jeradf))
+
 ## 0.3.6
 
 ### Patch Changes

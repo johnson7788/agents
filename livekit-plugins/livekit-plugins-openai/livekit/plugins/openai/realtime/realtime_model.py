@@ -76,6 +76,8 @@ class RealtimeResponse:
     """timestamp when the response was created"""
     _first_token_timestamp: float | None = None
     """timestamp when the first token was received"""
+    metadata: map | None = None
+    """developer-provided string key-value pairs"""
 
 
 @dataclass
@@ -109,6 +111,7 @@ class RealtimeToolCall:
 @dataclass
 class Capabilities:
     supports_truncate: bool
+    input_audio_sample_rate: int | None = None
 
 
 @dataclass
@@ -140,11 +143,14 @@ class ServerVadOptions:
     threshold: float
     prefix_padding_ms: int
     silence_duration_ms: int
+    create_response: bool = True
 
 
 @dataclass
 class InputTranscriptionOptions:
     model: api_proto.InputTranscriptionModel | str
+    language: str | None = None
+    prompt: str | None = None
 
 
 @dataclass
@@ -191,6 +197,7 @@ DEFAULT_SERVER_VAD_OPTIONS = ServerVadOptions(
     threshold=0.5,
     prefix_padding_ms=300,
     silence_duration_ms=500,
+    create_response=True,
 )
 
 DEFAULT_INPUT_AUDIO_TRANSCRIPTION = InputTranscriptionOptions(model="whisper-1")
@@ -717,6 +724,10 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
             on_duplicate: Literal[
                 "cancel_existing", "cancel_new", "keep_both"
             ] = "keep_both",
+            instructions: Optional[str] = None,
+            modalities: Optional[list[api_proto.Modality]] = None,
+            conversation: Literal["auto", "none"] = "auto",
+            metadata: Optional[dict[str, str]] = None,
         ) -> asyncio.Future[bool]:
             """Creates a new response.
 
@@ -725,6 +736,12 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                     - "cancel_existing": Cancel the existing response before creating new one
                     - "cancel_new": Skip creating new response if one is in progress
                     - "keep_both": Wait for the existing response to be done and then create a new one
+                instructions: explicit prompt used for out-of-band events
+                modalities: set of modalities that the model can respond in, defaults to audio
+                conversation: specifies whether response is out-of-band
+                    - "auto": Contents of the response will be added to the default conversation
+                    - "none": Creates an out-of-band response which will not add items to default conversation
+                metadata: set of key-value pairs that can be used for storing additional information
 
             Returns:
                 Future that resolves when the response create request is queued
@@ -753,12 +770,27 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                 **self._sess.logging_extra(),
             }
 
+            response_request: api_proto.ClientEvent.ResponseCreateData = {
+                "conversation": conversation
+            }
+            if instructions is not None:
+                response_request["instructions"] = instructions
+            if modalities is not None:
+                response_request["modalities"] = modalities
+            if metadata is not None:
+                response_request["metadata"] = metadata
+
             if (
                 not active_resp_id
                 or self._sess._pending_responses[active_resp_id].done_fut.done()
             ):
                 # no active response in progress, create a new one
-                self._sess._queue_msg({"type": "response.create"})
+                self._sess._queue_msg(
+                    {
+                        "type": "response.create",
+                        "response": response_request,
+                    }
+                )
                 _fut = asyncio.Future[bool]()
                 _fut.set_result(True)
                 return _fut
@@ -795,7 +827,12 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                 )
                 new_create_fut = asyncio.Future[None]()
                 self._sess._response_create_fut = new_create_fut
-                self._sess._queue_msg({"type": "response.create"})
+                self._sess._queue_msg(
+                    {
+                        "type": "response.create",
+                        "response": response_request,
+                    }
+                )
                 return True
 
             return asyncio.create_task(wait_and_create())
@@ -835,6 +872,8 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
         self._pending_responses: dict[str, RealtimeResponse] = {}
         self._active_response_id: str | None = None
         self._response_create_fut: asyncio.Future[None] | None = None
+        self._playout_complete = asyncio.Event()
+        self._playout_complete.set()
 
         self._session_id = "not-connected"
         self.session_update()  # initial session init
@@ -850,6 +889,10 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
 
         self._send_ch.close()
         await self._main_atask
+
+    @property
+    def playout_complete(self) -> asyncio.Event:
+        return self._playout_complete
 
     @property
     def fnc_ctx(self) -> llm.FunctionContext | None:
@@ -928,12 +971,21 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                 "threshold": self._opts.turn_detection.threshold,
                 "prefix_padding_ms": self._opts.turn_detection.prefix_padding_ms,
                 "silence_duration_ms": self._opts.turn_detection.silence_duration_ms,
+                "create_response": self._opts.turn_detection.create_response,
             }
         input_audio_transcription_opts: api_proto.InputAudioTranscription | None = None
         if self._opts.input_audio_transcription is not None:
             input_audio_transcription_opts = {
                 "model": self._opts.input_audio_transcription.model,
             }
+            if self._opts.input_audio_transcription.language is not None:
+                input_audio_transcription_opts["language"] = (
+                    self._opts.input_audio_transcription.language
+                )
+            if self._opts.input_audio_transcription.prompt is not None:
+                input_audio_transcription_opts["prompt"] = (
+                    self._opts.input_audio_transcription.prompt
+                )
 
         session_data: api_proto.ClientEvent.SessionUpdateData = {
             "modalities": self._opts.modalities,
@@ -1247,12 +1299,15 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
                 threshold=session["turn_detection"]["threshold"],
                 prefix_padding_ms=session["turn_detection"]["prefix_padding_ms"],
                 silence_duration_ms=session["turn_detection"]["silence_duration_ms"],
+                create_response=session["turn_detection"]["create_response"],
             )
         if session["input_audio_transcription"] is None:
             input_audio_transcription = None
         else:
             input_audio_transcription = InputTranscriptionOptions(
                 model=session["input_audio_transcription"]["model"],
+                language=session["input_audio_transcription"].get("language"),
+                prompt=session["input_audio_transcription"].get("prompt"),
             )
 
         self.emit(
@@ -1426,11 +1481,13 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
         response = response_created["response"]
         done_fut = self._loop.create_future()
         status_details = response.get("status_details")
+        metadata = cast(map, response.get("metadata"))
         new_response = RealtimeResponse(
             id=response["id"],
             status=response["status"],
             status_details=status_details,
             output=[],
+            metadata=metadata,
             usage=response.get("usage"),
             done_fut=done_fut,
             _created_timestamp=time.time(),
@@ -1605,6 +1662,8 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
 
         response.status = response_data["status"]
         response.status_details = response_data.get("status_details")
+        response.metadata = cast(map, response_data.get("metadata"))
+        response.output = cast(list[RealtimeOutput], response_data.get("output"))
         response.usage = response_data.get("usage")
 
         metrics_error = None
@@ -1704,6 +1763,9 @@ class RealtimeSession(utils.EventEmitter[EventTypes]):
 
         called_fnc = fnc_call_info.execute()
         await called_fnc.task
+
+        # wait for the audio to be played before creating the response
+        await self._playout_complete.wait()
 
         tool_call = llm.ChatMessage.create_tool_from_called_function(called_fnc)
         logger.info(

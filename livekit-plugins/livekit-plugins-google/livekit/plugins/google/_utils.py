@@ -10,14 +10,15 @@ from livekit.agents import llm, utils
 from livekit.agents.llm.function_context import _is_optional_type
 
 from google.genai import types
+from google.genai.types import Type as GenaiType
 
-JSON_SCHEMA_TYPE_MAP: dict[type, types.Type] = {
-    str: "STRING",
-    int: "INTEGER",
-    float: "NUMBER",
-    bool: "BOOLEAN",
-    dict: "OBJECT",
-    list: "ARRAY",
+JSON_SCHEMA_TYPE_MAP: dict[type, GenaiType] = {
+    str: GenaiType.STRING,
+    int: GenaiType.INTEGER,
+    float: GenaiType.NUMBER,
+    bool: GenaiType.BOOLEAN,
+    dict: GenaiType.OBJECT,
+    list: GenaiType.ARRAY,
 }
 
 __all__ = ["_build_gemini_ctx", "_build_tools"]
@@ -38,7 +39,7 @@ def _build_parameters(arguments: Dict[str, Any]) -> types.Schema | None:
             item_type = get_args(py_type)[0]
             if item_type not in JSON_SCHEMA_TYPE_MAP:
                 raise ValueError(f"Unsupported type: {item_type}")
-            prop.type = "ARRAY"
+            prop.type = GenaiType.ARRAY
             prop.items = types.Schema(type=JSON_SCHEMA_TYPE_MAP[item_type])
 
             if arg_info.choices:
@@ -62,7 +63,7 @@ def _build_parameters(arguments: Dict[str, Any]) -> types.Schema | None:
             required.append(arg_name)
 
     if properties:
-        parameters = types.Schema(type="OBJECT", properties=properties)
+        parameters = types.Schema(type=GenaiType.OBJECT, properties=properties)
         if required:
             parameters.required = required
 
@@ -90,9 +91,9 @@ def _build_gemini_ctx(
     chat_ctx: llm.ChatContext, cache_key: Any
 ) -> tuple[list[types.Content], Optional[types.Content]]:
     turns: list[types.Content] = []
-    current_content: Optional[types.Content] = None
     system_instruction: Optional[types.Content] = None
     current_role: Optional[str] = None
+    parts: list[types.Part] = []
 
     for msg in chat_ctx.messages:
         if msg.role == "system":
@@ -107,21 +108,18 @@ def _build_gemini_ctx(
         else:
             role = "user"
 
-        # Start new turn if role changes or if none is set
-        if current_content is None or current_role != role:
-            current_content = types.Content(role=role, parts=[])
-            turns.append(current_content)
+        # If role changed, finalize previous parts into a turn
+        if role != current_role:
+            if current_role is not None and parts:
+                turns.append(types.Content(role=current_role, parts=parts))
             current_role = role
-
-        if current_content.parts is None:
-            current_content.parts = []
+            parts = []
 
         if msg.tool_calls:
             for fnc in msg.tool_calls:
-                current_content.parts.append(
+                parts.append(
                     types.Part(
                         function_call=types.FunctionCall(
-                            id=fnc.tool_call_id,
                             name=fnc.function_info.name,
                             args=fnc.arguments,
                         )
@@ -131,20 +129,18 @@ def _build_gemini_ctx(
         if msg.role == "tool":
             if msg.content:
                 if isinstance(msg.content, dict):
-                    current_content.parts.append(
+                    parts.append(
                         types.Part(
                             function_response=types.FunctionResponse(
-                                id=msg.tool_call_id,
                                 name=msg.name,
                                 response=msg.content,
                             )
                         )
                     )
                 elif isinstance(msg.content, str):
-                    current_content.parts.append(
+                    parts.append(
                         types.Part(
                             function_response=types.FunctionResponse(
-                                id=msg.tool_call_id,
                                 name=msg.name,
                                 response={"result": msg.content},
                             )
@@ -153,19 +149,19 @@ def _build_gemini_ctx(
         else:
             if msg.content:
                 if isinstance(msg.content, str):
-                    current_content.parts.append(types.Part(text=msg.content))
+                    parts.append(types.Part(text=msg.content))
                 elif isinstance(msg.content, dict):
-                    current_content.parts.append(
-                        types.Part(text=json.dumps(msg.content))
-                    )
+                    parts.append(types.Part(text=json.dumps(msg.content)))
                 elif isinstance(msg.content, list):
                     for item in msg.content:
                         if isinstance(item, str):
-                            current_content.parts.append(types.Part(text=item))
+                            parts.append(types.Part(text=item))
                         elif isinstance(item, llm.ChatImage):
-                            current_content.parts.append(
-                                _build_gemini_image_part(item, cache_key)
-                            )
+                            parts.append(_build_gemini_image_part(item, cache_key))
+
+    # Finalize last role's parts if any remain
+    if current_role is not None and parts:
+        turns.append(types.Content(role=current_role, parts=parts))
 
     return turns, system_instruction
 
@@ -195,8 +191,7 @@ def _build_gemini_image_part(image: llm.ChatImage, cache_key: Any) -> types.Part
                     height=image.inference_height,
                     strategy="scale_aspect_fit",
                 )
-            encoded_data = utils.images.encode(image.image, opts)
-            image._cache[cache_key] = base64.b64encode(encoded_data).decode("utf-8")
+            image._cache[cache_key] = utils.images.encode(image.image, opts)
 
         return types.Part.from_bytes(
             data=image._cache[cache_key], mime_type="image/jpeg"

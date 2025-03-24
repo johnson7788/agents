@@ -59,6 +59,7 @@ class _ContentProto(Protocol):
 
 class _CapabilitiesProto(Protocol):
     supports_truncate: bool
+    input_audio_sample_rate: int | None
 
 
 class _RealtimeAPI(Protocol):
@@ -120,6 +121,11 @@ class _RealtimeAPISession(Protocol):
         self, item_id: str, content_index: int, audio_end_ms: int
     ) -> None: ...
 
+    @property
+    def playout_complete(self) -> asyncio.Event | None:
+        """Event that is set when the playout is done"""
+        pass
+
 
 @dataclass(frozen=True)
 class AgentTranscriptionOptions:
@@ -159,6 +165,7 @@ class MultimodalAgent(utils.EventEmitter[EventTypes]):
         transcription: AgentTranscriptionOptions = AgentTranscriptionOptions(),
         max_text_response_retries: int = 5,
         loop: asyncio.AbstractEventLoop | None = None,
+        noise_cancellation: rtc.NoiseCancellationOptions | None = None,
     ):
         """Create a new MultimodalAgent.
 
@@ -204,6 +211,8 @@ class MultimodalAgent(utils.EventEmitter[EventTypes]):
 
         self._text_response_retries = 0
         self._max_text_response_retries = max_text_response_retries
+
+        self._noise_cancellation = noise_cancellation
 
     @property
     def vad(self) -> vad.VAD | None:
@@ -434,10 +443,16 @@ class MultimodalAgent(utils.EventEmitter[EventTypes]):
         )
 
         def _on_playout_started() -> None:
+            if self._session.playout_complete is not None:
+                self._session.playout_complete.clear()
+
             self.emit("agent_started_speaking")
             self._update_state("speaking")
 
         def _on_playout_stopped(interrupted: bool) -> None:
+            if self._session.playout_complete is not None:
+                self._session.playout_complete.set()
+
             self.emit("agent_stopped_speaking")
             self._update_state("listening")
 
@@ -489,8 +504,17 @@ class MultimodalAgent(utils.EventEmitter[EventTypes]):
         self._subscribe_to_microphone()
 
     async def _micro_task(self, track: rtc.LocalAudioTrack) -> None:
-        stream_24khz = rtc.AudioStream(track, sample_rate=24000, num_channels=1)
-        async for ev in stream_24khz:
+        sample_rate = self._model.capabilities.input_audio_sample_rate
+        if sample_rate is None:
+            sample_rate = 24000
+
+        input_stream = rtc.AudioStream(
+            track,
+            sample_rate=sample_rate,
+            num_channels=1,
+            noise_cancellation=self._noise_cancellation,
+        )
+        async for ev in input_stream:
             self._input_audio_ch.send_nowait(ev.frame)
 
     def _subscribe_to_microphone(self, *args, **kwargs) -> None:

@@ -27,12 +27,13 @@ from livekit.agents import (
     llm,
     utils,
 )
-from livekit.agents.llm import ToolChoice, _create_ai_function_info
+from livekit.agents.llm import LLMCapabilities, ToolChoice, _create_ai_function_info
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 
 from google import genai
 from google.auth._default_async import default_async
 from google.genai import types
+from google.genai.errors import APIError, ClientError, ServerError
 
 from ._utils import _build_gemini_ctx, _build_tools
 from .log import logger
@@ -59,7 +60,7 @@ class LLM(llm.LLM):
     def __init__(
         self,
         *,
-        model: ChatModels | str = "gemini-2.0-flash-exp",
+        model: ChatModels | str = "gemini-2.0-flash-001",
         api_key: str | None = None,
         vertexai: bool = False,
         project: str | None = None,
@@ -84,7 +85,7 @@ class LLM(llm.LLM):
         - For Google Gemini API: Set the `api_key` argument or the `GOOGLE_API_KEY` environment variable.
 
         Args:
-            model (ChatModels | str, optional): The model name to use. Defaults to "gemini-2.0-flash-exp".
+            model (ChatModels | str, optional): The model name to use. Defaults to "gemini-2.0-flash-001".
             api_key (str, optional): The API key for Google Gemini. If not provided, it attempts to read from the `GOOGLE_API_KEY` environment variable.
             vertexai (bool, optional): Whether to use VertexAI. Defaults to False.
             project (str, optional): The Google Cloud project to use (only for VertexAI). Defaults to None.
@@ -98,8 +99,12 @@ class LLM(llm.LLM):
             frequency_penalty (float, optional): Penalizes the model for repeating words. Defaults to None.
             tool_choice (ToolChoice or Literal["auto", "required", "none"], optional): Specifies whether to use tools during response generation. Defaults to "auto".
         """
-        super().__init__()
-        self._capabilities = llm.LLMCapabilities(supports_choices_on_int=False)
+        super().__init__(
+            capabilities=LLMCapabilities(
+                supports_choices_on_int=False,
+                requires_persistent_functions=False,
+            )
+        )
         self._project_id = project or os.environ.get("GOOGLE_CLOUD_PROJECT", None)
         self._location = location or os.environ.get(
             "GOOGLE_CLOUD_LOCATION", "us-central1"
@@ -107,8 +112,8 @@ class LLM(llm.LLM):
         self._api_key = api_key or os.environ.get("GOOGLE_API_KEY", None)
         _gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         if _gac is None:
-            raise ValueError(
-                "`GOOGLE_APPLICATION_CREDENTIALS` environment variable is not set. please set it to the path of the service account key file."
+            logger.warning(
+                "`GOOGLE_APPLICATION_CREDENTIALS` environment variable is not set. please set it to the path of the service account key file. Otherwise, use any of the other Google Cloud auth methods."
             )
 
         if vertexai:
@@ -220,6 +225,7 @@ class LLMStream(llm.LLMStream):
 
     async def _run(self) -> None:
         retryable = True
+        request_id = utils.shortuuid()
 
         try:
             opts: dict[str, Any] = dict()
@@ -234,7 +240,7 @@ class LLMStream(llm.LLMStream):
                         # specific function
                         tool_config = types.ToolConfig(
                             function_calling_config=types.FunctionCallingConfig(
-                                mode="ANY",
+                                mode=types.FunctionCallingConfigMode.ANY,
                                 allowed_function_names=[self._tool_choice.name],
                             )
                         )
@@ -242,7 +248,7 @@ class LLMStream(llm.LLMStream):
                         # model must call any function
                         tool_config = types.ToolConfig(
                             function_calling_config=types.FunctionCallingConfig(
-                                mode="ANY",
+                                mode=types.FunctionCallingConfigMode.ANY,
                                 allowed_function_names=[
                                     fnc.name
                                     for fnc in self._fnc_ctx.ai_functions.values()
@@ -253,14 +259,14 @@ class LLMStream(llm.LLMStream):
                         # model can call any function
                         tool_config = types.ToolConfig(
                             function_calling_config=types.FunctionCallingConfig(
-                                mode="AUTO"
+                                mode=types.FunctionCallingConfigMode.AUTO
                             )
                         )
                     elif self._tool_choice == "none":
                         # model cannot call any function
                         tool_config = types.ToolConfig(
                             function_calling_config=types.FunctionCallingConfig(
-                                mode="NONE",
+                                mode=types.FunctionCallingConfigMode.NONE,
                             )
                         )
                     opts["tool_config"] = tool_config
@@ -276,17 +282,17 @@ class LLMStream(llm.LLMStream):
                 system_instruction=system_instruction,
                 **opts,
             )
-            async for response in self._client.aio.models.generate_content_stream(
+            stream = await self._client.aio.models.generate_content_stream(
                 model=self._model,
                 contents=cast(types.ContentListUnion, turns),
                 config=config,
-            ):
-                response_id = utils.shortuuid()
+            )
+            async for response in stream:  # type: ignore
                 if response.prompt_feedback:
                     raise APIStatusError(
                         response.prompt_feedback.json(),
                         retryable=False,
-                        request_id=response_id,
+                        request_id=request_id,
                     )
 
                 if (
@@ -297,7 +303,7 @@ class LLMStream(llm.LLMStream):
                     raise APIStatusError(
                         "No candidates in the response",
                         retryable=True,
-                        request_id=response_id,
+                        request_id=request_id,
                     )
 
                 if len(response.candidates) > 1:
@@ -306,7 +312,7 @@ class LLMStream(llm.LLMStream):
                     )
 
                 for index, part in enumerate(response.candidates[0].content.parts):
-                    chat_chunk = self._parse_part(response_id, index, part)
+                    chat_chunk = self._parse_part(request_id, index, part)
                     if chat_chunk is not None:
                         retryable = False
                         self._event_ch.send_nowait(chat_chunk)
@@ -315,7 +321,7 @@ class LLMStream(llm.LLMStream):
                     usage = response.usage_metadata
                     self._event_ch.send_nowait(
                         llm.ChatChunk(
-                            request_id=response_id,
+                            request_id=request_id,
                             usage=llm.CompletionUsage(
                                 completion_tokens=usage.candidates_token_count or 0,
                                 prompt_tokens=usage.prompt_token_count or 0,
@@ -323,7 +329,30 @@ class LLMStream(llm.LLMStream):
                             ),
                         )
                     )
-
+        except ClientError as e:
+            raise APIStatusError(
+                "gemini llm: client error",
+                status_code=e.code,
+                body=e.message,
+                request_id=request_id,
+                retryable=False if e.code != 429 else True,
+            ) from e
+        except ServerError as e:
+            raise APIStatusError(
+                "gemini llm: server error",
+                status_code=e.code,
+                body=e.message,
+                request_id=request_id,
+                retryable=retryable,
+            ) from e
+        except APIError as e:
+            raise APIStatusError(
+                "gemini llm: api error",
+                status_code=e.code,
+                body=e.message,
+                request_id=request_id,
+                retryable=retryable,
+            ) from e
         except Exception as e:
             raise APIConnectionError(
                 "gemini llm: error generating content",
